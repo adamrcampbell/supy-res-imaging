@@ -4,6 +4,9 @@ import scipy.ndimage
 from scipy.signal import convolve2d
 from skimage.filters import gaussian
 from skimage import data, io, color
+from skimage.exposure import rescale_intensity
+from sklearn.metrics import mean_squared_error
+import matplotlib.pyplot as plt
 
 import sys
 
@@ -12,7 +15,9 @@ import sys
 #======================================================================
 
 sample = color.rgb2gray(data.astronaut())
-
+# resampling method for up/down-scaling images
+# note: 0 = nearest, 1 = bilinear, 2 = cubic
+resampling = 2
 # number of y low resolution images
 num_low_res_images = 5
 # assumed to be square
@@ -21,23 +26,24 @@ high_res_image_dim = sample.shape[0]
 image_ratio = high_res_image_dim / low_res_image_dim
 
 # error_threshold = 10.0
-max_iter = 20
+max_iter = 100
 error = sys.float_info.max
 has_converged = False
 
 low_res = np.ndarray((num_low_res_images, low_res_image_dim, low_res_image_dim), np.float32)
 for k in range(num_low_res_images):
-    low_res[k] = scipy.ndimage.zoom(gaussian(sample), (1/image_ratio, 1/image_ratio), order=0)
+    low_res[k] = scipy.ndimage.zoom(gaussian(sample), (1/image_ratio, 1/image_ratio), order=resampling)
 
-# 2D interpolation across YX axis, ignoring Z interpolation
-# note: order 0 = nearest, 1 = bilinear, 2 = cubic
 # resize low res images to same dimensions as high res image
-low_res_upsampled = scipy.ndimage.zoom(low_res, (1, image_ratio, image_ratio), order=0)
+low_res_upsampled = scipy.ndimage.zoom(low_res, (1, image_ratio, image_ratio), order=resampling)
 # print(low_res_upsampled)
 
 # Synthesize initial high resolution image guess, should this be sum or average of pixels? idk
 high_res = np.average(low_res_upsampled, axis=0)
-# print(high_res)
+
+sharpen_kernel = np.array([[0, -1, 0],
+                          [-1, 5, -1],
+                           [0, -1, 0]])
 
 current_iter = 0
 while current_iter < max_iter and not has_converged:
@@ -48,7 +54,7 @@ while current_iter < max_iter and not has_converged:
     # note: probably a terrible way to do it atm...
     low_res_predicted = np.ndarray((num_low_res_images, low_res_image_dim, low_res_image_dim), np.float32)
     for k in range(num_low_res_images):
-        low_res_predicted[k] = scipy.ndimage.zoom(gaussian(high_res), (1/image_ratio, 1/image_ratio), order=0)
+        low_res_predicted[k] = scipy.ndimage.zoom(gaussian(high_res), (1/image_ratio, 1/image_ratio), order=resampling)
 
     # Calculate the error between low_res and low_res_predicted
     l2norm_sum = 0
@@ -63,12 +69,8 @@ while current_iter < max_iter and not has_converged:
     error = curr_err
     print("Error: %f..." % error)
 
-    sharpen_kernel = np.array([[0, -1, 0],
-                            [-1, 5, -1],
-                            [0, -1, 0]])
-
     # Make high resolution version of low res predicted
-    low_res_predicted_upsampled = scipy.ndimage.zoom(low_res_predicted, (1, image_ratio, image_ratio), order=0)
+    low_res_predicted_upsampled = scipy.ndimage.zoom(low_res_predicted, (1, image_ratio, image_ratio), order=resampling)
     # Take the difference of low resolution upsampled and low resolution predicted upsampled
     low_res_upsampled_diff = low_res_upsampled - low_res_predicted_upsampled
 
@@ -87,7 +89,28 @@ while current_iter < max_iter and not has_converged:
     # io.imshow(np.absolute(high_res), plugin="matplotlib", **{"cmap": "Greys"})
     # io.show()
     np.copyto(high_res, high_res_predicted)
+    rmse = mean_squared_error(sample, high_res, squared=False)
+    print("Iter %d rrmse %f...\n" % (current_iter, rmse * 100))
+ 
+# Image rendering
+# fig, axes = plt.subplots(1, 3)
+# ax = axes.ravel()
 
-    
+# ax[0].imshow(sample, cmap=plt.cm.gray)
+# ax[1].imshow(high_res, cmap=plt.cm.gray)
+# ax[2].imshow(np.absolute(sample - high_res), cmap=plt.cm.gray)
+
+# 
+# plt.show()
+
+fig, axes = plt.subplots(nrows=1, ncols=3)
+im1 = axes[0].imshow(sample, cmap=plt.cm.gray)
+axes[0].set_title("Original (sum %.3f, min %.3f, max %.3f)"  % (np.sum(sample), np.min(sample), np.max(sample)))
+im2 = axes[1].imshow(high_res, cmap=plt.cm.gray)
+axes[1].set_title("Reconstructed (sum %.3f, min %.3f, max %.3f)" % (np.sum(high_res), np.min(high_res), np.max(high_res)))
+abs_diff = np.absolute(sample - high_res)
+im3 = axes[2].imshow(abs_diff, cmap=plt.cm.gray)
+axes[2].set_title("Absolute Diff (sum %.3f, min %.3f, max %.3f)" % (np.sum(abs_diff), np.min(abs_diff), np.max(abs_diff)))
+plt.show()
+
 print("Finished processing...")
-sys.exit()
