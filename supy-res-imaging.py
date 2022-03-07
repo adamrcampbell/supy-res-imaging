@@ -1,129 +1,128 @@
 
-from random import random
 import numpy as np
-import scipy.ndimage
+from scipy.ndimage import zoom
 from scipy.signal import convolve2d
 from skimage.filters import gaussian
 from skimage import data, io, color
-from skimage.util import random_noise
+from skimage.util import random_noise, img_as_float32
 from skimage.exposure import rescale_intensity
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 
 import sys
 
-sample = color.rgb2gray(data.astronaut())
-# blur = gaussian(sample)
-# noise = random_noise(sample)
-# blur_then_noise = random_noise(blur)
+def display_image_stack(*images):
+    fig, axes = plt.subplots(nrows=1, ncols=len(images))
 
-# fig, axes = plt.subplots(nrows=1, ncols=4)
-# im1 = axes[0].imshow(sample, cmap=plt.cm.gray)
-# axes[0].set_title("Original")
-# im2 = axes[1].imshow(blur, cmap=plt.cm.gray)
-# axes[1].set_title("Gaussian Blur")
-# im3 = axes[2].imshow(noise, cmap=plt.cm.gray)
-# axes[2].set_title("Gaussian Noise")
-# im4 = axes[3].imshow(blur_then_noise, cmap=plt.cm.gray)
-# axes[3].set_title("Gaussian Blur then Noise")
-# plt.show()
-# sys.exit()
+    if len(images) == 1:
+        im = axes.imshow(images[0], cmap=plt.cm.gray)
+    else:
+        for i in range(len(images)):
+            im = axes[i].imshow(images[i], cmap=plt.cm.gray)
+            axes[i].set_title("sum %.3f, min %.3f, max %.3f"  % (np.sum(images[i]), np.min(images[i]), np.max(images[i])))
+    plt.show()
+
+def display_image_stack_block(count, *images):
+    fig, axes = plt.subplots(nrows=1, ncols=count)
+    print(images[0].shape)
+
+    for i in range(count):
+        im = axes[i].imshow(images[0][i], cmap=plt.cm.gray)
+        axes[i].set_title("sum %.3f, min %.3f, max %.3f"  % (np.sum(images[0][i]), np.min(images[0][i]), np.max(images[0][i])))
+    plt.show()
+
+def plot_error_over_time(timesteps, error, rrmse):
+    plt.plot(range(timesteps), np.log2(error), label="Error (y_true, y_predict")
+    # plt.plot(range(timesteps), rrmse, label="RRMSE (x_true, x_predict_k)")
+    plt.xticks(range(timesteps))
+    plt.xlabel("Timestep (t)")
+    plt.ylabel("Error")
+    plt.show()
 
 #======================================================================
 # Preliminary implementation of the Iterative Back Projection technique
 #======================================================================
 
-sample = color.rgb2gray(data.astronaut())
-# resampling method for up/down-scaling images
-# note: 0 = nearest, 1 = bilinear, 2 = cubic
-resampling = 0
+# x_true = color.rgb2gray(data.astronaut())
+x_true = img_as_float32(data.camera())
 # number of y low resolution images
-num_low_res_images = 5
-# assumed to be square
-low_res_image_dim = 256
-high_res_image_dim = sample.shape[0]
-image_ratio = high_res_image_dim / low_res_image_dim
+num_y_samples = 10
+# controls the size of low resolution image dimensions
+downsample_factor = 0.5
+x_img_dim = x_true.shape[0]
+y_img_dim = int(x_img_dim * downsample_factor)
+upsample_factor = x_img_dim / y_img_dim
 
-# error_threshold = 10.0
-max_iter = 10
-error = sys.float_info.max
-has_converged = False
+max_iter = 100
 
-low_res = np.ndarray((num_low_res_images, low_res_image_dim, low_res_image_dim), np.float32)
-for k in range(num_low_res_images):
-    low_res[k] = scipy.ndimage.zoom(sample, (1/image_ratio, 1/image_ratio), order=resampling)
-    low_res[k] = random_noise(gaussian(low_res[k]))
+y_true = np.ndarray((num_y_samples, y_img_dim, y_img_dim), np.float32)
+for k in range(num_y_samples):
+    # Smooth image, downsample, apply gaussian noise
+    y_true[k] = random_noise(zoom(gaussian(x_true), downsample_factor))
 
-# resize low res images to same dimensions as high res image
-low_res_upsampled = scipy.ndimage.zoom(low_res, (1, image_ratio, image_ratio), order=resampling)
-# print(low_res_upsampled)
+# Predict initial estimate of x_true
+x_predict = zoom(np.average(y_true, axis=0), upsample_factor)
 
-# Synthesize initial high resolution image guess
-high_res = np.average(low_res_upsampled, axis=0)
+laplace_scale = 1.0
+# laplace_deblur = np.array([[0, -1,  0], [-1,  5, -1], [0, -1,  0]], dtype=np.float32)
+laplace_deblur = np.array([[0, -laplace_scale,  0], [-laplace_scale,  1.0 + 4*laplace_scale, -laplace_scale], [0, -laplace_scale,  0]])
+# laplace_deblur = np.array([[0.0, 0.0,  0.0], [0.0,  1.0, 0.0], [0.0, 0.0,  0.0]])
+delta = np.array([[0.0, 0.0,  0.0], [0.0,  1.0, 0.0], [0.0, 0.0,  0.0]])
 
-laplace_deblur = np.array([[0, -1,  0],
-                          [-1,  5, -1],
-                           [0, -1,  0]])
+# print(np.sum((delta - gaussian(laplace_deblur))**2))
+# io.imshow(delta-gaussian(laplace_deblur))
+# io.show()
+# sys.exit()
+
+x_estimates = np.ndarray((max_iter, x_img_dim, x_img_dim), np.float32)
+x_error = np.zeros(max_iter)
+x_rrmse = np.zeros(max_iter)
 
 current_iter = 0
-while current_iter < max_iter: # and not has_converged:
-    current_iter += 1
+while current_iter < max_iter:
     print("Processing iteration %d..." % current_iter)
 
     # Predict low resolution images from high resolution image
     # note: probably a terrible way to do it atm...
-    low_res_predicted = np.ndarray((num_low_res_images, low_res_image_dim, low_res_image_dim), np.float32)
-    for k in range(num_low_res_images):
-        low_res_predicted[k] = scipy.ndimage.zoom(sample, (1/image_ratio, 1/image_ratio), order=resampling)
-        low_res_predicted[k] = random_noise(gaussian(low_res_predicted[k]))
+    y_predict = np.ndarray((num_y_samples, y_img_dim, y_img_dim), np.float32)
+    for k in range(num_y_samples):
+        y_predict[k] = zoom(gaussian(x_predict), downsample_factor)
 
     # Calculate the error between low_res and low_res_predicted
-    l2norm_sum = 0
-    for k in range(num_low_res_images):
-        l2norm_sum = l2norm_sum + np.linalg.norm(low_res[k] - low_res_predicted[k])
-    curr_err = np.sqrt(1/num_low_res_images * l2norm_sum)
-
-    # if curr_err > error:
-    #     has_converged = True
-    #     print("Converged")
-    #     break
-    
-    error = curr_err
-    print("Error: %f..." % error)
+    l2norm_sum_squares = 0.0
+    for k in range(num_y_samples):
+        l2norm_sum_squares = l2norm_sum_squares + np.linalg.norm(y_true[k] - y_predict[k])**2
+    error = np.sqrt(1.0/num_y_samples * l2norm_sum_squares)
+    # print("Iter %d error: %f..." % (current_iter, error))
+    x_error[current_iter] = error
 
     # Make high resolution version of low res predicted
-    low_res_predicted_upsampled = scipy.ndimage.zoom(low_res_predicted, (1, image_ratio, image_ratio), order=resampling)
-    # Take the difference of low resolution upsampled and low resolution predicted upsampled
-    low_res_upsampled_diff = low_res_upsampled - low_res_predicted_upsampled
+    y_true_pred_diff = zoom(y_true - y_predict, (1, int(upsample_factor), int(upsample_factor)))
 
     # Convolve each image with sharpen filter
-    for k in range(num_low_res_images):
-        output = convolve2d(low_res_upsampled_diff[k], laplace_deblur)
-        # trim off filter padding
-        low_res_upsampled_diff[k] = output[1:high_res_image_dim+1, 1:high_res_image_dim+1]
+    for k in range(num_y_samples):
+        # convolve with laplacian deblur, trim edges (padded during convolution)
+        y_true_pred_diff[k] = convolve2d(y_true_pred_diff[k], laplace_deblur)[1:x_img_dim+1, 1:x_img_dim+1]
 
     # Predict high resolution image
-    high_res_predicted = np.zeros_like(high_res)
-    sum_diff = np.sum(low_res_upsampled_diff, axis=0)
+    x_new_predict = np.zeros_like(x_predict)
+    sum_diff = np.sum(y_true_pred_diff, axis=0)
     # weight = max(min(error, 1.0), 0.0) # clamp func for at most 1.0 multiplier
-    weight = max(min(1.0/error, 1.0), 0.0)
-    print("Iter %d weight: %f" % (current_iter, weight))
-    high_res_predicted = high_res + sum_diff * 1/num_low_res_images * weight
-    # io.imshow(np.absolute(high_res), plugin="matplotlib", **{"cmap": "Greys"})
-    # io.show()
-    np.copyto(high_res, high_res_predicted)
-    rmse = mean_squared_error(sample, high_res, squared=False)
-    print("Iter %d rrmse %f...\n" % (current_iter, rmse * 100))
- 
-# Image rendering
-fig, axes = plt.subplots(nrows=1, ncols=3)
-im1 = axes[0].imshow(sample, cmap=plt.cm.gray)
-axes[0].set_title("Original (sum %.3f, min %.3f, max %.3f)"  % (np.sum(sample), np.min(sample), np.max(sample)))
-im2 = axes[1].imshow(high_res, cmap=plt.cm.gray)
-axes[1].set_title("Reconstructed (sum %.3f, min %.3f, max %.3f)" % (np.sum(high_res), np.min(high_res), np.max(high_res)))
-abs_diff = np.absolute(sample - high_res)
-im3 = axes[2].imshow(abs_diff, cmap=plt.cm.gray)
-axes[2].set_title("Absolute Diff (sum %.3f, min %.3f, max %.3f)" % (np.sum(abs_diff), np.min(abs_diff), np.max(abs_diff)))
-plt.show()
+    # weight = max(min(1.0/error, 1.0), 0.0)
+    weight = 0.1
+    # print("Iter %d weight: %f" % (current_iter, weight))
+    x_new_predict = x_predict + sum_diff * 1.0/num_y_samples * weight
+    rrmse = mean_squared_error(x_true, x_new_predict, squared=False) * 100.0
+    # print("x_true min/max: %f, %f..." % (np.min(x_true), np.max(x_true)))
+    # print("x_pred min/max: %f, %f..." % (np.min(x_new_predict), np.max(x_new_predict)))
+    x_rrmse[current_iter] = rrmse
+    # print("Iter %d rrmse %f...\n" % (current_iter, rrmse))
+    np.copyto(x_predict, x_new_predict)
+    np.copyto(x_estimates[current_iter], x_new_predict)
+    current_iter += 1
+
+display_image_stack(x_true, x_predict, np.absolute(x_true - x_predict), y_predict[0])
+# display_image_stack_block(max_iter, x_estimates)
+plot_error_over_time(max_iter, x_error, x_rrmse)
 
 print("Finished processing...")
