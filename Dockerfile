@@ -9,17 +9,14 @@ RUN apt-get update \
   && ln -s /usr/bin/python3 python \
   && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv venv \
-  && . venv/bin/activate \
-  && pip3 --no-cache-dir install --upgrade pip \
-  && pip3 install numpy
+RUN pip3 --no-cache-dir install --upgrade pip \
+  && pip3 install numpy \
+  && pip3 install jupyterlab
 
-# All of this needs a rework...
-# See: https://stackoverflow.com/a/48562835
-
-# Note: look for a way to reduce this, Ubuntu img is heavy...
+# Run jupyter lab as a service, ip=0.0.0.0 allows external container access
+CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
 
 # To build:
-# docker build -t supy:latest -f Dockerfile .
-# To run (opens bash terminal):
-# docker run supy
+# sudo docker build -t supy_res:latest -f Dockerfile .
+# To run (opens jupyter notebook as service)
+# sudo docker run -p 8888:8888 supy_res
