@@ -1,17 +1,36 @@
-FROM ubuntu:22.04
+FROM nvidia/cuda:11.6.0-devel-ubuntu20.04
 
 # Disable prompts from apt.
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
-  && apt-get install -y python3-pip python3.10-venv \
-  && cd /usr/local/bin \
-  && ln -s /usr/bin/python3 python \
-  && rm -rf /var/lib/apt/lists/*
+# Install python3, pip, and other requisites
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  software-properties-common \
+  && add-apt-repository -y ppa:deadsnakes/ppa \
+  && apt-get update && apt-get install -y --no-install-recommends \
+  curl \
+  python3.10 \
+  python3.10-dev \
+  python3.10-distutils \
+  python3-pip \
+  python3-venv \
+  && apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
+  
+# Symbolic link so python3 resolves to python3.10
+RUN ln -sf /usr/bin/python3.10 /usr/bin/python3
 
-RUN pip3 --no-cache-dir install --upgrade pip \
-  && pip3 install numpy \
-  && pip3 install jupyterlab
+# Fixes odd issue where pip3 cannot upgrade/install libs
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+
+# Now upgrade, and add some packages for testing
+COPY requirements.txt .
+RUN pip3 --no-cache-dir install --upgrade setuptools pip \
+  && pip3 install -r requirements.txt
+
+RUN mkdir /supy_res
+COPY /notebooks /supy_res
+WORKDIR /supy_res
 
 # Run jupyter lab as a service, ip=0.0.0.0 allows external container access
 CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
@@ -19,4 +38,4 @@ CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root
 # To build:
 # sudo docker build -t supy_res:latest -f Dockerfile .
 # To run (opens jupyter notebook as service)
-# sudo docker run -p 8888:8888 supy_res
+# sudo docker run --rm --it -p 8888:8888 --gpus all supy_res:latest
