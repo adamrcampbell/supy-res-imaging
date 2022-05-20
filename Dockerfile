@@ -32,10 +32,7 @@ RUN mkdir /supy_res
 COPY /notebooks /supy_res
 WORKDIR /supy_res
 
-# Run jupyter lab as a service, ip=0.0.0.0 allows external container access
-CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
+ENV JUPY_PORT=$JUPYTER_PORT
 
-# To build:
-# sudo docker build -t supy_res:latest -f Dockerfile .
-# To run (opens jupyter notebook as service)
-# sudo docker run --rm --it -p 8888:8888 --gpus all supy_res:latest
+# Run jupyter lab as a service, ip=0.0.0.0 allows external container access
+CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=$JUPY_PORT", "--no-browser", "--allow-root"]
