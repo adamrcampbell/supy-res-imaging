@@ -29,20 +29,22 @@ DATA_DIR := $(BASEDIR)/data
 .PHONY: vars help test k8s show lint deploy delete logs describe namespace default all clean
 .DEFAULT_GOAL := help
 
-virtual_env: ## Creates and activates local virtual env, and installs requirements.txt for local execution
-	python3 -m venv $(VENV)
-	source $(VENV)/bin/activate
-	pip3 install -r requirements.txt
+env: ## Creates and activates local virtual env, and installs requirements.txt for local execution
+	python3 -m venv $(BASEDIR)/$(VENV)
+	. $(BASEDIR)/$(VENV)/bin/activate
+	pip3 install -r $(BASEDIR)/requirements.txt
 
 build: ## Build Docker image for GPU-supported supy_res_imaging jupter labs environment
 	docker build --build-arg JUPYTER_PORT=$(JUPYTER_PORT) -t $(IMAGE) -f Dockerfile .
-	
+
+lab: ## Runs jupyter labs locally; assumes the virtual environment is set up
+
 run: ## Run supy_res_imaging via Docker hosted Jupyter Labs (with NVIDIA GPU support)
 	docker run --rm --it --gpus all -p $(HOST_TO_JUPYTER_PORT):$(JUPYTER_PORT) $(IMAGE)
 
 clean: ## Deactivates and deletes the local virtual env
 	deactivate
-	$(RMRF) $(VENV)
+	$(RMRF) $(BASEDIR)/$(VENV)
 
 help:  ## Show this help menu
 	@echo "$(MAKE) targets:"
