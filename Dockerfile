@@ -32,7 +32,6 @@ RUN mkdir /supy_res
 COPY /notebooks /supy_res
 WORKDIR /supy_res
 
-ENV JUPY_PORT=$JUPYTER_PORT
-
 # Run jupyter lab as a service, ip=0.0.0.0 allows external container access
-CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=$JUPY_PORT", "--no-browser", "--allow-root"]
+# CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=$JUPY_PORT", "--no-browser", "--allow-root"]
+CMD jupyter-lab --ip=0.0.0.0 --port=$JUPY_PORT --no-browser --allow-root

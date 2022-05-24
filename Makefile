@@ -35,12 +35,13 @@ env: ## Creates and activates local virtual env, and installs requirements.txt f
 	pip3 install -r $(BASEDIR)/requirements.txt
 
 build: ## Build Docker image for GPU-supported supy_res_imaging jupter labs environment
-	docker build --build-arg JUPYTER_PORT=$(JUPYTER_PORT) -t $(IMAGE) -f Dockerfile .
+	docker build -t $(IMAGE) -f Dockerfile .
 
 lab: ## Runs jupyter labs locally; assumes the virtual environment is set up
 
 run: ## Run supy_res_imaging via Docker hosted Jupyter Labs (with NVIDIA GPU support)
-	docker run --rm --it --gpus all -p $(HOST_TO_JUPYTER_PORT):$(JUPYTER_PORT) $(IMAGE)
+	docker run --rm --it --gpus all -p $(HOST_TO_JUPYTER_PORT):$(JUPYTER_PORT) \
+		--env JUPY_PORT=$(JUPYTER_PORT) $(IMAGE)
 
 clean: ## Deactivates and deletes the local virtual env
 	deactivate
