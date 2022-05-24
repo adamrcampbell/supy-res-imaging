@@ -29,7 +29,8 @@ RUN pip3 --no-cache-dir install --upgrade setuptools pip \
   && pip3 install -r requirements.txt
 
 RUN mkdir /supy_res
-COPY /notebooks /supy_res
+COPY notebooks /supy_res/notebooks
+COPY data /supy_res/data
 WORKDIR /supy_res
 
 # Run jupyter lab as a service, ip=0.0.0.0 allows external container access
