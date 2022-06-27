@@ -1,0 +1,10 @@
+./casa -c /home/arc/Research/Projects/casa-measurement-set-extract/ms_to_sep_extractor.py \
+                --ms_file='/home/arc/Research/Visibility_Datasets/gleam_small/sim_small.ms' \
+                --dest_dir='/home/arc/Research/Visibility_Datasets/gleam_small/ms_extraction/' \
+                --file_name='gleam_small' \
+                --nrecvs=512 \
+                --nchans=1 \
+                --nsteps=30 \
+                --extractable_timesteps 0 30 1 \
+                --extractable_baselines 0 130816 1 \
+                --extractable_channels  0 1 1
