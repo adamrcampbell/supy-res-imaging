@@ -1,0 +1,112 @@
+--- 
+# General 
+NUM_RECEIVERS:                     512   
+
+IMAGE_SIZE:			   800
+PSF_SIZE:                          800
+FOV_DEG:                           1.0
+
+# updated frequency changes
+FREQUENCY_START_HZ:                140000000
+FREQUENCY_BANDWIDTH:               0
+FREQUENCY_NUM_CHANNELS:            1 
+NUM_TIMESTEPS:                     5
+
+#  added new for batching
+TIMESTEP_BATCH_SIZE:                1
+
+# enum added new for multi-scale synthesis, 
+# default 0 for delta, 1 for tapered truncated parabolas, 2 for truncated gaussians
+MULTISCALE_CLEAN_SHAPE:             0
+# lower scale bias will favour smaller scales during cleaning
+MULTISCALE_SCALE_BIAS:              0.6 
+NUM_MULTISCALE_SUPPORTS:            4    #full supports for scaled cleaning shapes if not delta, assume first being 1 and powers of 2 eg 4 = [1.0, 2.0, 4.0, 8.0] 
+
+#Added new for multi-frequency synthesis
+MULTIFREQUENCY_USE:                    0    # default to use multifrequency scaling in gridder
+MULTIFREQUENCY_REFERENCE_HZ:           0.0  # default 0 if calculate reference vref = mean of lowest and highest frequency 
+MULTIFREQUENCY_SPECTRAL_INDEX_OVERALL: 0.6  # default overall spectral index alpha0
+MULTIFREQUENCY_NUM_MOMENTS:            3    # number of Taylor terms to use when working with multifrequency visibilities
+
+VIS_INTENSITY_FILE:                "gleam_small_ts_0_29.vis"
+VIS_UVW_FILE:                      "gleam_small_ts_0_29.uvw"
+
+# VIS_INTENSITY_FILE:                "gleam_small_ts_0_4.vis"
+# VIS_UVW_FILE:                      "gleam_small_ts_0_4.uvw"
+
+# VIS_INTENSITY_FILE:                "gleam_small_ts_5_9.vis"
+# VIS_UVW_FILE:                      "gleam_small_ts_5_9.uvw"
+
+# VIS_INTENSITY_FILE:                "gleam_small_ts_10_14.vis"
+# VIS_UVW_FILE:                      "gleam_small_ts_10_14.uvw"
+
+# VIS_INTENSITY_FILE:                "gleam_small_ts_15_19.vis"
+# VIS_UVW_FILE:                      "gleam_small_ts_15_19.uvw"
+
+# VIS_INTENSITY_FILE:                "gleam_small_ts_20_24.vis"
+# VIS_UVW_FILE:                      "gleam_small_ts_20_24.uvw"
+
+# VIS_INTENSITY_FILE:                "gleam_small_ts_25_29.vis"
+# VIS_UVW_FILE:                      "gleam_small_ts_25_29.uvw"
+
+INPUT_DATA_PATH:                   "/home/seth/Adam/"
+OUTPUT_DATA_PATH:                  "/home/seth/Desktop/HPC/Projects/cuda_direct_imaging/data/"
+
+NUM_MAJOR_CYCLES:                  1
+
+RIGHT_ASCENSION:                   1
+
+# Natural = 0, Uniform = 1, Robust = 2
+WEIGHTING_SCHEME:                  0
+# Value should range from (-2.0 to +2.0)
+# -2.0 is close to uniform weighting
+# +2.0 is close to natural weighting
+ROBUSTNESS:                        0.0
+
+SAVE_DIRTY_IMAGES:                 1
+SAVE_RESIDUAL_IMAGES:              0
+SAVE_EXTRACTED_SOURCES:            0
+SAVE_PREDICTED_VIS:                0
+SAVE_ESTIMATED_GAINS:              0
+
+# GPU Specific
+RETAIN_DEVICE_MEM:                 0
+
+# Gain Calibration
+PERFORM_GAIN_CALIBRATION:          0
+MAX_CALIBRATION_CYCLES:            5
+NUM_OF_CALIBRATION_CYCLES:         1
+
+USE_DEFAULT_GAINS:                 1
+DEFAULT_GAINS_FILE:                "default_gains.csv"
+
+# Gridding
+GRID_PADDING_SCALAR:               1.2
+MIN_ABS_W:                         0.000605   
+MAX_ABS_W:                         1895.410847844
+
+# W-Projection Gridding
+MIN_HALF_SUPPORT:                  4
+MAX_HALF_SUPPORT:                  4
+NUM_W_PLANES:                      17
+OVERSAMPLING:                      16 # must be power of 2
+LOAD_KERNELS_FROM_FILE:            0
+SAVE_KERNELS_TO_FILE:              0
+
+# Nifty Gridding
+NIFTY_PERFORM_SHIFT_FFT:		       1
+NIFTY_UPSAMPLING:		               2.0
+NIFTY_SUPPORT:			               7
+NIFTY_BETA:			                   2.307
+NIFTY_NUM_W_GRIDS_TO_BATCH:	       7
+
+# Deconvolution
+NUM_MINOR_CYCLES_CALIBRATION:      400
+NUM_MINOR_CYCLES_IMAGING:          100
+LOOP_GAIN:                         0.1
+WEAK_SOURCE_THRESHOLD_CALIBRATION: 0.005
+WEAK_SOURCE_THRESHOLD_IMAGING:     0.0002
+NOISE_FACTOR:                      1.2
+SEARCH_REGION_PERCENT:             100.0
+
+# Direct Fourier Transform
