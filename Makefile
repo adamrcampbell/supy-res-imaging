@@ -40,8 +40,13 @@ build: ## Build Docker image for GPU-supported supy_res_imaging jupter labs envi
 lab: ## Runs jupyter labs locally; assumes the virtual environment is set up
 
 run: ## Run supy_res_imaging via Docker hosted Jupyter Labs (with NVIDIA GPU support)
-	docker run --rm -it --gpus all -p $(HOST_TO_JUPYTER_PORT):$(JUPYTER_PORT) \
-		--env JUPY_PORT=$(JUPYTER_PORT) $(IMAGE)
+	docker run --rm -it --gpus all                      \
+		-p $(HOST_TO_JUPYTER_PORT):$(JUPYTER_PORT)  \
+		--env JUPY_PORT=$(JUPYTER_PORT)             \
+		-v $(BASEDIR)/notebooks:/supy_res/notebooks \
+		-v $(BASEDIR)/data:/supy_res/data           \
+		-v $(BASEDIR)/datasets:/supy_res/datasets   \
+		$(IMAGE)
 
 clean: ## Deactivates and deletes the local virtual env
 	deactivate
