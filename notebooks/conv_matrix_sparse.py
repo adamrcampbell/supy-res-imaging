@@ -1,65 +1,54 @@
 
+from memory_profiler import profile
 import numpy as np
-from scipy.sparse import bsr_matrix
+from scipy.sparse import bsr_matrix, diags, dia_matrix, csr_matrix
 
-def convolution_matrix_sparse(l, kernel):
-    
-    # Allocate a key-value pair for each distinct kernel sample (key) to an empty list (value) 
-    pixel_to_row_col_dict = {val : [] for val in np.unique(kernel)}
-    full_supp = kernel.shape[0] # assumed square
-    half_supp = (full_supp - 1) // 2
-    
-    kernel = kernel.flatten()
-    neighbour_strides = np.arange(-(half_supp), half_supp+1)
-    
-    for m_row in np.arange(l**2):
-        
-        # map flattened m_row to 2d row/col  
-        row, col = (m_row // l, m_row % l)
-        # print(f"M_row {m_row} maps to row/col {row}, {col}")
-        
-        neighbour_rows = neighbour_strides + row
-        neighbour_cols = neighbour_strides + col
-        
-        # map kernel to neighbouring indices of row/col, from centre of kernel
-        meshgrid = np.meshgrid(neighbour_rows, neighbour_cols, copy=False)
-        mesh = np.array(meshgrid)
-        neighbour_indices = mesh.T.reshape(-1, 2)
-        
-        # zero out in kernel, any neighbours which have negative index or greater than l
-        bad_rows = np.concatenate((np.where(neighbour_indices[:, 0] < 0)[0], np.where(neighbour_indices[:, 0] >= l)[0]))
-        bad_cols = np.concatenate((np.where(neighbour_indices[:, 1] < 0)[0], np.where(neighbour_indices[:, 1] >= l)[0]))
-        # get a set of distinct neighbours to be zeroed out (in case of duplicate entries where a bad row is also a bad column)
-        bad_neighbours = np.unique(np.concatenate((bad_rows, bad_cols)))
-        # print(f"Bad neighbours: {bad_neighbours}")
+# Steps to map a 2d convolution kernel to a "convolution" matrix. 
+# Note: this disregards padding of the convolution at edges of the matrix to be "convolved" with. This is essentially a diagonal matrix, where the 2d kernel
+#       is flattened, and each 1d "slice" is strided from one another by a separation of around "convolution" matrix width.
+# Note: this method assumes we can build up a subset of the full matrix (lets call it a "submatrix"), and use simply arithmetic to
+#       "slide" the submatrix diagonally to populate the full "convolution" matrix.
+# Note: The format for storing this matrix is the Block Compressed Row sparse matrix format:
+#       https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.bsr_matrix.html
 
-        modified_kernel = np.copy(kernel)
-        # print(f"Original kernel: {modified_kernel}")
-        modified_kernel = np.delete(modified_kernel, bad_neighbours)
-        # print(f"Modified kernel: {modified_kernel}")
-        col_strides = np.repeat(neighbour_strides, (np.repeat(full_supp, full_supp))) * (l - full_supp)
-        # print(f"Col Strides: {col_strides}")
-        cols = np.delete((np.arange(m_row, m_row + full_supp**2) - full_supp**2 // 2 + col_strides), bad_neighbours)
-        
-        # print(f"Column vals: {cols}")
-        for index, entry in enumerate(modified_kernel):
-            pixel_to_row_col_dict[entry].append((m_row, cols[index]))
-        
-    entries = sum(len(v) for v in pixel_to_row_col_dict.values())
-    # print(entries)
+@profile
+def conv_matrix_sparse(l, kernel):
+    supp = kernel.shape[0]
+    half_supp = (supp - 1) // 2
+    diagonal_strides = np.linspace(-half_supp, half_supp, supp, dtype=np.intc)
 
-    row_col_pairs = np.zeros((entries, 2), dtype=np.uintc)
-    kernel_samples = np.zeros(entries, dtype=np.float32)
-    stride = 0
-    for k, v in pixel_to_row_col_dict.items():
+    submatrix_cols = np.zeros([], dtype=np.uintc)
+    submatrix_rows = np.zeros([], dtype=np.uintc)
+    submatrix_elements = np.zeros([], dtype=np.float32)
 
-        if not v: # ignore pixels with no entries
-            continue
+    for k in range(supp):
+        # generate unpadded diagonal sparse matrix of kth kernel slice
+        k_bsr = dia_matrix.tocsr(diags(kernel[k], diagonal_strides, shape=(l, l)))
 
-        multiplier = len(v)
-        # print(multiplier)
-        kernel_samples[stride : stride + multiplier] = k
-        row_col_pairs[stride : stride + multiplier] = v
-        stride += multiplier
-    
-    return bsr_matrix((kernel_samples, (row_col_pairs[:, 0], row_col_pairs[:, 1])), shape=(l**2, l**2))
+        cols_for_rows = np.split(k_bsr.indices, k_bsr.indptr[1:-1]) # get col indices for entries in matrix
+        rows_for_cols = np.repeat(np.arange(l), [len(arr) for arr in cols_for_rows])
+        cols_for_rows = np.concatenate(cols_for_rows).ravel() + k * l # offset each diagonal
+
+        # Ideally use of pre-allocated memory of known dimensions is ideal... but okay for now
+        submatrix_cols = np.append(submatrix_cols, cols_for_rows)
+        submatrix_rows = np.append(submatrix_rows, rows_for_cols)
+        submatrix_elements = np.append(submatrix_elements, k_bsr.data)
+
+    matrix_cols = np.zeros([], dtype=np.uintc)
+    matrix_rows = np.zeros([], dtype=np.uintc)
+    matrix_elements = np.zeros([], dtype=np.float32)
+
+    # Now that we have the initial "submatrix" of diagonals, we can populate
+    # the sparse matrix using strided, truncated submatrices
+    for index, stride in enumerate(np.arange(-half_supp, -half_supp + l) * l):
+        strided_cols = submatrix_cols + stride
+        in_range_cols = np.where((strided_cols >= 0) & (strided_cols < l**2))
+        strided_rows = submatrix_rows + index * l
+        valid_elements = submatrix_elements
+
+        # This needs changing at some point, highly inefficient...
+        matrix_cols = np.append(matrix_cols, strided_cols[in_range_cols])
+        matrix_rows = np.append(matrix_rows, strided_rows[in_range_cols])
+        matrix_elements = np.append(matrix_elements, submatrix_elements[in_range_cols])
+
+    return csr_matrix((matrix_elements, (matrix_rows, matrix_cols)), shape=(l**2, l**2))
