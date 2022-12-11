@@ -20,8 +20,8 @@ RMRF=rm -rf
 NAME := supy_res_imaging
 TAG := latest
 IMAGE := $(NAME):$(TAG)
-HOST_TO_JUPYTER_PORT := 8888
-JUPYTER_PORT := 8888
+HOST_TO_JUPYTER_PORT := 8889
+JUPYTER_PORT := 8889
 VENV := venv
 
 DATA_DIR := $(BASEDIR)/data

@@ -1,8 +1,10 @@
-# Use the below version for running on Titan
 FROM nvidia/cuda:10.2-devel-ubuntu18.04
 
 # Use the below version for running on RTX2060
 # FROM nvidia/cuda:11.6.0-devel-ubuntu20.04
+
+# Use the below version when not using a GPU, and trying to use Intel MKL
+# FROM ubuntu:jammy
 
 # Disable prompts from apt.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -14,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get update && apt-get install -y --no-install-recommends \
   curl \
   git \
+#  intel-mkl \
   python3.10 \
   python3.10-dev \
   python3.10-distutils \
@@ -34,10 +37,11 @@ RUN pip3 --no-cache-dir install --upgrade setuptools pip \
   && pip3 install -r requirements.txt
 
 RUN mkdir /supy_res
-# COPY notebooks /supy_res/notebooks
-# COPY data /supy_res/data
 WORKDIR /supy_res
+
+# Update LD_LIBRARY_PATH to locate OpenMP/IntelMKL (bit of a hack)
+# ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH
 
 # Run jupyter lab as a service, ip=0.0.0.0 allows external container access
 # CMD ["jupyter-lab", "--ip=0.0.0.0", "--port=$JUPY_PORT", "--no-browser", "--allow-root"]
-CMD jupyter-lab --ip=0.0.0.0 --port=$JUPY_PORT --no-browser --allow-root
+ CMD jupyter-lab --ip=0.0.0.0 --port=$JUPY_PORT --no-browser --allow-root
