@@ -27,6 +27,10 @@ executing==0.8.3
 fonttools==4.29.1
 idna==3.3
 imageio==2.16.1
+
+# Needed for parallel sparse matrix multiply
+# intel-openmp
+
 ipykernel==6.9.1
 ipympl==0.8.8
 ipython==8.1.1
@@ -59,6 +63,7 @@ memory_profiler
 
 mistune==0.8.4
 mpmath==1.2.1
+
 multiprocess==0.70.12.2
 nbclassic==0.3.6
 nbclient==0.5.12
@@ -75,6 +80,7 @@ packaging==21.3
 pandas
 pandocfilters==1.5.0
 parso==0.8.3
+
 pexpect==4.8.0
 pickleshare==0.7.5
 Pillow==9.0.1
@@ -97,6 +103,10 @@ scipy==1.8.1
 Send2Trash==1.8.0
 six==1.16.0
 sniffio==1.2.0
+
+# needed for parallel sparse matrix mult
+# sparse-dot-mkl
+
 stack-data==0.2.0
 sympy==1.10.1
 terminado==0.13.2
