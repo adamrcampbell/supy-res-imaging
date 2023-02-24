@@ -22,11 +22,100 @@ from skimage.transform import resize
 
 from joblib import Parallel, delayed
 
+### ===================================================================================================================
+### PRIMARY SUPER-RESOLUTION IMAGING FUNC (START)
+### ===================================================================================================================
+
+def load_image(filepath, pixels_per_dim, normalised=False):
+    if normalised:
+        return normalise(np.fromfile(filepath, dtype=np.float32).reshape(pixels_per_dim, pixels_per_dim))
+    else:
+        return np.fromfile(filepath, dtype=np.float32).reshape(pixels_per_dim, pixels_per_dim)
+
+def linear_system_imager_solve(s_mat, dh_mat, b_mat, x_true, l, beta, weights, solver, num_solver_iterations, rrmse_per_beta_per_solve_iter, current_beta_and_iteration_indices):
+    # Callback for iterative solution
+    current_iteration = np.zeros(1, dtype=np.intc)
+    current_iteration[0] = -1
+    cb = lambda current_solution : eval_iteration_solution(current_solution, x_true, num_solver_iterations, current_iteration, l, rrmse_per_beta_per_solve_iter, current_beta_and_iteration_indices)
+    # Perform iterative solving using linear operator approach
+    s_mat_lineop = aslinearoperator(s_mat)
+    dh_mat_lineop = aslinearoperator(dh_mat)
+    a_mat_lineop = (beta * (s_mat_lineop.T @ s_mat_lineop)) + ((dh_mat_lineop.T @ dh_mat_lineop) * np.sum(weights))
+    x_solution, _ = solver(a_mat_lineop, b_mat, maxiter=num_solver_iterations, callback=cb) #, callback_type='x')
+    return x_solution.reshape(l, l)
+    
+def linear_system_imager(l, m, n, downsample, timesteps, timesteps_per_y, beta, blur_kernel_support, dh_matrix_batch_size, num_solver_iterations, solver, use_LoG, accelerated, rrmse_per_beta_per_solve_iter=None, current_beta_and_iteration_indices=None):
+    
+    # Image weights, assumed 1.0 for all images (full confidence)
+    weights = np.ones(n)
+    
+    # all time steps direct image    
+    x_true = load_image(f"../datasets/gleam_small/images/single_source/direct_image_ts_0_29_{l}x{l}.bin", l, True)
+    # show_image(x_true, "True X")
+
+    x_psf = load_image(f"../datasets/gleam_small/images/single_source/direct_psf_ts_0_29_{l}x{l}.bin", l)
+    # show_image(x_psf, "Untrimmed PSF")
+    # plt.plot(x_psf[x_psf.shape[0]//2])
+    # plt.show()
+
+    blur_kernel_support_half = (blur_kernel_support - 1) // 2
+    trim_min = l//2 - (blur_kernel_support_half)
+    trim_max = l//2 + blur_kernel_support_half + 1
+    # print(f"PSF min/max/support: {trim_min}, {trim_max}, {blur_kernel_support}")
+    # x_psf = x_psf.reshape(l, l)[psf_min:psf_max, psf_min:psf_max]
+    x_psf_trimmed = x_psf.copy()[trim_min : trim_max, trim_min : trim_max]
+    x_psf_trimmed /= np.sum(x_psf_trimmed)
+    # print(np.sum(x_psf_trimmed))
+    # plt.plot(x_psf_trimmed[x_psf_trimmed.shape[0]//2])
+    # plt.show()
+
+    # print(f"PSF Shape: {x_psf_trimmed.shape[0]}")
+    # show_image(x_psf_trimmed, "PSF")
+
+    # print(f"l^2:                      {l**2}")
+    # print(f"(psf_support - 2) * m^2:  {(blur_kernel_support - 2) * m**2}")
+    # print(f"n * m^2:                  {n * m**2}")
+
+    # Determine whether we have the right criteria to perform super-resolution imaging to obtain X
+    if l**2 <= np.minimum((blur_kernel_support - 2) * m**2, n * m**2):
+        pass #print("Super-resolution imaging technically possible, continuing...\n")
+    else:
+        raise ValueError("High-resolution image not possible to reproduce from your set up, review your configuration against this if statement conditional.\n")
+
+    # Storing all low-res images as layered stack
+    y = np.zeros((n, m, m))
+
+    # batched time steps direct images
+    for i in range(n):
+        timestep_range_start = i * timesteps_per_y
+        timestep_range_end = timestep_range_start + timesteps_per_y
+        y[i] = load_image(f"../datasets/gleam_small/images/single_source/direct_image_ts_{timestep_range_start}_{timestep_range_end - 1}_{m}x{m}.bin", m, True)
+
+    s_mat = generate_s_matrix(l, use_LoG, 51)
+    # print(matrix_memory(s))
+
+    # if use_LoG:
+    #     β *= 4.0
+    
+    dh_mat = generate_dh_matrix_batched(x_psf_trimmed, l, downsample, dh_matrix_batch_size)
+    # show_sparse_matrix(dh_numba, "DH Numba")
+    # rint(f"DH matrix memory usage: {matrix_memory(dh)}MB")
+    
+    b_mat = generate_b_image(l, n, weights, dh_mat, y)
+    # show_image(b.reshape(l, l), "B")
+    
+    x_solution = linear_system_imager_solve(s_mat, dh_mat, b_mat, x_true, l, beta, weights, solver, num_solver_iterations, rrmse_per_beta_per_solve_iter, current_beta_and_iteration_indices)
+    show_image(x_solution, "Final X Solution")
+
+### ===================================================================================================================
+### PRIMARY SUPER-RESOLUTION IMAGING FUNC (END)
+### ===================================================================================================================
+
 def numpy_memory(a):
-    return (a.size * a.itemsize) / 10**6
+    return (a.size * a.itemsize) / 10**9
 
 def matrix_memory(m):
-    return (m.data.nbytes + m.indptr.nbytes + m.indices.nbytes) / 10**6 # MB
+    return (m.data.nbytes + m.indptr.nbytes + m.indices.nbytes) / 10**9 # GB
 
 def matrix_density(m):
     return m.getnnz() / np.prod(m.shape)
@@ -40,11 +129,31 @@ def show_image(image, title, flip_x_axis=False, fig_height=15, fig_width=15):
     plt.colorbar()
     plt.show()
     
-def show_iter_solution(x):
-    l = np.sqrt(x.shape[0]).astype(np.uintc)
-    plt.imshow(np.fliplr(x.reshape(l, l)), cmap=plt.get_cmap("gray"))
-    plt.colorbar()
-    plt.show()
+def eval_iteration_solution(x, x_true, num_iterations, current_iteration, image_dim, rrmse_per_beta_per_solve_iter=None, current_beta_and_iteration_indices=None):
+    x = x.reshape(image_dim, image_dim)
+    x_true = x_true.reshape(image_dim, image_dim)
+    
+    if rrmse_per_beta_per_solve_iter is not None: # assumed benchmarking
+        rrmse_per_beta_per_solve_iter[current_beta_and_iteration_indices[0], current_beta_and_iteration_indices[1]] = rrmse(normalise(x), normalise(x_true))
+        current_beta_and_iteration_indices[1] = (current_beta_and_iteration_indices[1] + 1) % num_iterations
+    else: # assumed visualisation
+        x_peak = np.unravel_index(np.argmax(x, axis=None), x.shape)
+        x_true_peak = np.unravel_index(np.argmax(x_true, axis=None), x_true.shape)
+        x_peak_row = x[x_peak[0]]
+        x_true_peak_row = x_true[x_true_peak[0]]
+        rmse = np.sqrt(np.mean((normalise(x_peak_row)-normalise(x_true_peak_row))**2))
+        print(f"RMSE (row slice): {rmse}, RRMSE (full image): {rrmse(normalise(x), normalise(x_true))}, iteration: {current_iteration[0]}")
+
+        if current_iteration[0] % 5 == 0:
+            fig, axes = plt.subplots(nrows=1, ncols=3)
+            axes[0].imshow(np.fliplr(x), cmap=plt.get_cmap("gray"))
+            axes[1].imshow(np.fliplr(x_true), cmap=plt.get_cmap("gray"))
+            axes[2].plot(normalise(x_peak_row))
+            axes[2].plot(normalise(x_true_peak_row))
+            fig.tight_layout()
+            plt.show()
+            
+    current_iteration[0] += 1
     
 def show_sparse_matrix(image, title, fig_height=15, fig_width=15):
     plt.rcParams['figure.figsize'] = [fig_width, fig_height]
@@ -108,11 +217,11 @@ def conv_matrix(l, kernel):
     k_samples = k_supp**2
     col_offsets = np.repeat(np.arange(k_supp) - k_half_supp, k_supp) * (l - k_supp)
     diagonal_offsets = (np.arange(k_samples) - (k_samples-1)//2) + col_offsets
-    m = diags(kernel.flatten(), diagonal_offsets, shape=(l**2, l**2), format="bsr", dtype=np.float32)
+    m = diags(kernel.flatten(), diagonal_offsets, shape=(l**2, l**2), format="csr", dtype=np.float32)
     
     mask_vals = np.repeat(1.0, k_supp)
     mask_offsets = np.linspace(-k_half_supp, k_half_supp, k_supp, dtype=np.intc)
-    mask = diags(mask_vals, mask_offsets, shape=(l, l), format="bsr", dtype=np.float32)
+    mask = diags(mask_vals, mask_offsets, shape=(l, l), format="csr", dtype=np.float32)
     
     try:
         Parallel(n_jobs=-1, prefer='threads')(delayed(apply_mask)(row, l, k_half_supp, m, mask) for row in range(l))
@@ -136,19 +245,13 @@ def generate_h_matrix(l, kernel):
     # print(f"H matrix density: {matrix_density(h)}%")
     return h 
     
-def generate_s_matrix(l, kernel=None, use_laplacian_of_gaussian=False):
-
-    # default to 3x3 laplacian
-    if kernel is None:
-        # kernel = np.array([[0, -1,  0], [-1,  4, -1], [0, -1,  0]], dtype=np.float32)
-        kernel = np.array([[-1, -1,  -1], [-1,  8, -1], [-1, -1,  -1]], dtype=np.float32)
+def generate_s_matrix(l, use_laplacian_of_gaussian=False, num_log_samples=7, sigma=1.0):
     
     # Sharpening matrix (laplacian)
     if use_laplacian_of_gaussian:
-        psf_central_support = 15 # num pixels around centre of PSF which represent approx 1/3 of the curve, maybe a bit bigger for padding
-        downsampling = np.linspace(-(psf_central_support-1)//2, (psf_central_support-1)//2, num=psf_central_support)
+        downsampling = np.linspace(-1.0, 1.0, num=num_log_samples)
         lap_of_gauss = np.zeros((downsampling.shape[0], downsampling.shape[0]), np.float32)
-        lap_gauss_σ = 2.205128205 # need to play around with this to get similar structure to true laplacian 3x3
+        lap_gauss_σ = sigma # 1.4 # 2.205128205 # need to play around with this to get similar structure to true laplacian 3x3
         for i in np.arange(downsampling.shape[0]):
             for j in np.arange(downsampling.shape[0]):
                 lap_of_gauss[i][j] = -laplacian_of_gaussian(downsampling[i], downsampling[j], lap_gauss_σ)
@@ -157,8 +260,19 @@ def generate_s_matrix(l, kernel=None, use_laplacian_of_gaussian=False):
 
         plt.plot(lap_of_gauss[lap_of_gauss.shape[0]//2])
         plt.show()
+    else:
+        # default to 3x3 laplacian
+        kernel = np.array([[0, -1,  0], [-1,  4, -1], [0, -1,  0]], dtype=np.float32)
 
-        # β *= 4.0
+    s = conv_matrix(l, kernel)
+    # print(type(s))
+    # print(f"S matrix memory usage: {matrix_memory(s)}MB")
+    # print(f"S matrix density: {matrix_density(s)}%")
+    # show_sparse_matrix(s, "S")
+    
+    return s
+
+def generate_s_matrix_alt(l, kernel):
 
     s = conv_matrix(l, kernel)
     # print(type(s))
@@ -170,7 +284,7 @@ def generate_s_matrix(l, kernel=None, use_laplacian_of_gaussian=False):
     
 def generate_b_image(l, n, w, dh, y):
     b = np.zeros(l**2, dtype=np.float32)
-
+    
     for i in np.arange(n):
         b += w[i] * csr_matrix.transpose(dh) @ y[i].flatten()
         
@@ -211,7 +325,7 @@ def generate_dh_matrix_batched(kernel, high_res_dim, downsample, dh_matrix_batch
     
     return m
 
-@njit(parallel = True)
+# @njit(parallel = True)
 def populate_dh_buffers_batched(d_origins, kernel, low_res_dim, high_res_dim, original_kernel_samples, batch_size, batch_offset):
     
     kernel_samples = kernel.shape[0]
@@ -219,23 +333,22 @@ def populate_dh_buffers_batched(d_origins, kernel, low_res_dim, high_res_dim, or
     kernel = kernel.flatten()
     
     buffer_strides = np.zeros(batch_size, dtype=np.uintc)
-    left_clip = np.zeros(batch_size, dtype=np.uintc)
-    right_clip = np.zeros(batch_size, dtype=np.uintc)
+    samples_per_dh_row = np.zeros(low_res_dim**2, dtype=np.uintc)
     
     # First pass to determine how big to make row/col/val buffers and the stride used for each thread to populate each respective row of DH
     for i in prange(batch_size):
         repeated_range = np.repeat(np.arange(kernel_samples).astype(np.intc), kernel_samples)
         cols = repeated_range.reshape(-1, kernel_samples).T.flatten() + (repeated_range * high_res_dim) + d_origins[i+batch_offset] - kernel_offset
-        left_clip[i] = cols[cols < 0].shape[0]
-        right_clip[i] = cols[cols >= high_res_dim**2].shape[0]
+        exclusion_mask = matrix_edge_exclusion_mask(d_origins[i+batch_offset], high_res_dim, kernel_samples, original_kernel_samples)
+        cols = cols[exclusion_mask == 1]
+        samples_per_dh_row[i] = cols.shape[0]
     
-    samples_per_clipped_dh_row = kernel_samples**2 - (left_clip + right_clip)
-    total_samples = samples_per_clipped_dh_row.sum()
+    total_samples = samples_per_dh_row.sum()
     
     # Below for Numba annotated func, cumsum doesnt support type...
-    buffer_strides = np.append([0], np.cumsum(samples_per_clipped_dh_row))
+    # buffer_strides = np.append([0], np.cumsum(samples_per_dh_row))
     # Below for regular func, cumsum requires dtype...
-    # buffer_strides = np.append([0], np.cumsum(samples_per_clipped_dh_row, dtype=np.uintc)) # prepend 0 to allow for ranges
+    buffer_strides = np.append([0], np.cumsum(samples_per_dh_row, dtype=np.uintc)) # prepend 0 to allow for ranges
     
     row_buffer = np.zeros(total_samples, dtype=np.uintc)
     col_buffer = np.zeros(total_samples, dtype=np.uintc)
@@ -245,9 +358,11 @@ def populate_dh_buffers_batched(d_origins, kernel, low_res_dim, high_res_dim, or
     for i in prange(batch_size):
         repeated_range = np.repeat(np.arange(kernel_samples).astype(np.intc), kernel_samples)
         cols = repeated_range.reshape(-1, kernel_samples).T.flatten() + (repeated_range * high_res_dim) + d_origins[i+batch_offset] - kernel_offset
+        exclusion_mask = matrix_edge_exclusion_mask(d_origins[i+batch_offset], high_res_dim, kernel_samples, original_kernel_samples)
+        cols = cols[exclusion_mask == 1]
         row_buffer[buffer_strides[i] : buffer_strides[i+1]] = i+batch_offset
-        col_buffer[buffer_strides[i] : buffer_strides[i+1]] = cols[left_clip[i] : kernel_samples**2 - right_clip[i]]
-        val_buffer[buffer_strides[i] : buffer_strides[i+1]] = kernel[left_clip[i] : kernel_samples**2 - right_clip[i]]
+        col_buffer[buffer_strides[i] : buffer_strides[i+1]] = cols
+        val_buffer[buffer_strides[i] : buffer_strides[i+1]] = kernel[exclusion_mask == 1]
         
     return row_buffer, col_buffer, val_buffer
         
@@ -265,6 +380,19 @@ def produce_stacked_kernel(kernel, downsample):
 def calculate_d_origins(high_res_dim, downsample):
     low_res_dim = high_res_dim // downsample
     return np.tile(np.arange(0, high_res_dim, downsample), low_res_dim) + np.repeat(np.arange(low_res_dim) * high_res_dim * downsample, low_res_dim)
+
+# Produces a mask which is applied to a single row of DH, such that it zeroes out any entries which should not contribute to that row.
+# Can be thought of as handling edge cases for convolution when some samples land out of bounds - we want to ignore these... same principle
+def matrix_edge_exclusion_mask(current_index, high_res_dim, stacked_kernel_dim, original_kernel_dim):
+    current_row = current_index // high_res_dim
+    current_col = current_index % high_res_dim
+    mask = np.ones((stacked_kernel_dim, stacked_kernel_dim))
+    row_neighbours = np.arange(current_row, current_row + stacked_kernel_dim) - ((original_kernel_dim-1)//2)
+    col_neighbours = np.arange(current_col, current_col + stacked_kernel_dim) - ((original_kernel_dim-1)//2)
+    mask[(row_neighbours < 0) | (row_neighbours >= high_res_dim), :] = 0
+    mask[:, (col_neighbours < 0) | (col_neighbours >= high_res_dim)] = 0
+    
+    return mask.flatten()
 
 ### ===================================================================================================================
 ### FUNCTIONS FOR PRODUCING DH MATRIX (END)
@@ -643,3 +771,4 @@ def calculate_d_origins(high_res_dim, downsample):
     
     # return csr_matrix((vals, (rows, cols)), shape=(samples_per_new_pixel**2, original_dim**2))
     # return mat.tocsr()
+    
